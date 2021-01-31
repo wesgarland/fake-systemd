@@ -31,16 +31,19 @@ function get_unit_file(){
     done
 }
 
+function unescape(){
+    sed -e "s/%[i]/$UNIT_INSTANCE/g" \
+        -e "s/%[I]/\"$UNIT_INSTANCE\"/g" \
+        -e "s/%[n]/$UNIT_FULL/g" \
+        -e "s/%[N]/\"$UNIT_FULL\"/g" \
+        -e "s/%%/%/g"
+}
 function read_option(){
     local option="$1"
 
     value="$(grep '^'$option'[= ]' "$UNIT_FILE" | cut -d '=' -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     value="`
-        echo $value |
-        sed -e "s/%[i]/$UNIT_INSTANCE/g" \
-            -e "s/%[I]/\"$UNIT_INSTANCE\"/g" \
-            -e "s/%[n]/$UNIT_FULL/g" \
-            -e "s/%[N]/\"$UNIT_FULL\"/g"
+        echo $value | unescape
     `"
     # TODO: Add more options from:
     # https://www.freedesktop.org/software/systemd/man/systemd.unit.html#Specifiers
@@ -64,11 +67,7 @@ function read_multioption(){
     local option="$1"
 
     while IFS= read -r line; do
-        echo "$line" |
-            sed -e "s/%[i]/$UNIT_INSTANCE/g" \
-                -e "s/%[I]/\"$UNIT_INSTANCE\"/g" \
-                -e "s/%[n]/$UNIT_FULL/g" \
-                -e "s/%[N]/\"$UNIT_FULL\"/g"
+        echo "$line" | unescape
     done < <( sed ':a;N;$!ba;s/\\[[:space:]]*\n//g' "$UNIT_FILE" | grep '^'$option'[= ]' | cut -d '=' -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' )
 
     # TODO: Add more options from:
@@ -120,21 +119,23 @@ function action_start(){
     # reaching the "active" state. That means another request to start
     # the unit will perform the action again.
     if [[ "${Type,,}" == *"oneshot"* ]]; then
-        local ExecStart=$(read_multioption ExecStart)
+        read_multioption ExecStartPre | while read i; do
+            [ ! "$i" ] && continue
+            [ "$debug" ] && echo " - Pre: $i" >&2
+            eval $i
+        done
 
-        while IFS=$'\n' read -a i; do
-            # ignore errors
-            $(eval echo "$i") || echo
-        done  <<< "${ExecStartPre[@]}"
+        read_multioption ExecStart | while read i; do
+            [ ! "$i" ] && continue
+            [ "$debug" ] && echo " - Exec: /$i/" >&2
+            eval $i
+        done
 
-        while IFS=$'\n' read -a i; do
-            # ignore errors
-            $(eval echo "$i") || echo
-        done  <<< "${ExecStart[@]}"
-
-        while IFS=$'\n' read -a i; do
-            $(eval echo "$i")
-        done  <<< "${ExecStartPost[@]}"
+        read_multioption ExecStartPost | while read i; do
+            [ ! "$i" ] && continue
+            [ "$debug" ] && echo " - Post: $i" >&2
+            eval $i
+        done
     elif [ -z $Type ] || [[ "${Type,,}" == *"simple"* ]] || [[ "${Type,,}" == *"notify"* ]] || [[ "${Type,,}" == *"forking"* ]] ; then
 
         makepid=""
