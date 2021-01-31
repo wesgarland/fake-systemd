@@ -3,6 +3,21 @@
 # lower vars:     in local function
 # camelcase vars: systemd params var
 
+# use root= to override root of filesystem for debugging, chroot prep, etc
+[ "$root" ] || root=/
+cd "$root" && root=`pwd`/
+
+# use debug=verbose to print out commands as they are run
+[ "$debug" = "verbose" ] && set -x
+
+# Search for start-stop-daemon - varies based on distro
+ssd=/usr/bin/start-stop-daemon
+[ -x "$ssd" ] || ssd=/bin/start-stop-daemon
+[ -x "$ssd" ] || ssd=${root}usr/bin/start-stop-daemon
+[ -x "$ssd" ] || ssd=${root}bin/start-stop-daemon
+[ -x "$ssd" ] || ssd=`which start-stop-daemon`
+[ ! -x "$ssd" ] && echo "Could not locate start-stop-daemon" 2>&1 && exit 1
+
 function get_unit_file(){
     for dir in ${UNIT_PATHS[@]} ; do
         if [ -f "${dir}${UNIT}" ] ; then
@@ -68,7 +83,6 @@ function get_unit_wants() {
                 ls -1 "${DIR}${UNIT}.wants/" | tr '\n' ' '
             fi
         done
-    
         # Print wants from unit-file
         read_option Wants $UNIT_FILE
     )`
@@ -125,7 +139,7 @@ function action_start(){
 
         makepid=""
         if [ -z "$PIDFile" ]; then
-            PIDdir="/run/${UNIT_NAME}"
+            PIDdir="${root}run/${UNIT_NAME}"
 
             mkdir -p $PIDdir
             [ -n "$User" ] && chown $User $PIDdir
@@ -135,7 +149,7 @@ function action_start(){
 
         [ -f "$EnvironmentFile" ] && source "$EnvironmentFile"
 
-        cmd=("/usr/bin/start-stop-daemon --background --start --pidfile $PIDFile $makepid")
+        cmd=("$ssd --background --start --pidfile $PIDFile $makepid")
 
         [ -f "$WorkingDirectory" ] && cmd+=("--chdir $WorkingDirectory")
         [ -n "$User" ] && cmd+=("--chuid $User")
@@ -169,7 +183,7 @@ function action_stop(){
     local ExecStopPost=$(read_multioption ExecStopPost)
     local Environment=$(read_multioption Environment)
 
-    [ -z "$PIDFile" ] && PIDFile="/run/${UNIT_NAME}/${UNIT_NAME}.pid"
+    [ -z "$PIDFile" ] && PIDFile="${root}run/${UNIT_NAME}/${UNIT_NAME}.pid"
     [ -f "$EnvironmentFile" ] && source "$EnvironmentFile"
 
     # export Environnement
@@ -180,7 +194,7 @@ function action_stop(){
 
     # Stop service 
     if [ -z "$ExecStop" ] ; then
-        cmd="/usr/bin/start-stop-daemon --stop --pidfile $PIDFile"
+        cmd="$ssd --stop --pidfile $PIDFile"
         [ -n "$User" ] && cmd+=("--chuid $User")
     else
         cmd="$ExecStop"
@@ -215,7 +229,7 @@ function action_enable(){
         exit 1
     fi
     
-    local WANTEDBY_DIR="/etc/systemd/system/$WantedBy.wants"
+    local WANTEDBY_DIR="${root}etc/systemd/system/$WantedBy.wants"
 
     if [ ! -f "$WANTEDBY_DIR/$UNIT_FULL" ] ; then
         mkdir -p $WANTEDBY_DIR
@@ -232,7 +246,7 @@ function action_disable(){
         exit 1
     fi
 
-    local WANTEDBY_DIR="/etc/systemd/system/$WantedBy.wants"
+    local WANTEDBY_DIR="${root}etc/systemd/system/$WantedBy.wants"
 
     if [ -f "$WANTEDBY_DIR/$UNIT_FULL" ] ; then
         echo Removed $WANTEDBY_DIR/$UNIT_FULL.
@@ -247,7 +261,7 @@ function action_isenabled(){
     if [ -z $WantedBy ] ; then
         echo "unknown"
     else
-        local WANTEDBY_DIR="/etc/systemd/system/$WantedBy.wants"
+        local WANTEDBY_DIR="${root}etc/systemd/system/$WantedBy.wants"
         if [ -f "$WANTEDBY_DIR/$UNIT_FULL" ] ; then
             echo "enabled"
             exit 0
@@ -279,7 +293,7 @@ function _get_pid(){
     local PIDFile=$(read_option PIDFile)
 
     # set default pifile
-    [ -z "$PIDFile" ] && PIDFile="/run/${UNIT_NAME}/${UNIT_NAME}.pid"
+    [ -z "$PIDFile" ] && PIDFile="${root}run/${UNIT_NAME}/${UNIT_NAME}.pid"
 
     # now check if the pidfile exists
     if [ ! -f "$PIDFile" ]; then
@@ -327,24 +341,22 @@ function exec_action(){
     [[ $UNIT =~ '.' ]] || UNIT="$UNIT.service"
 
     local UNIT_NAME=$(echo $UNIT | cut -d '.' -f1)
-
     if [[ $UNIT =~ '@' ]] ; then
         local UNIT_INSTANCE=`echo $UNIT | cut -d'@' -f2- | cut -d. -f1`
         local UNIT=`echo $UNIT | sed "s/$UNIT_INSTANCE//"`
     fi
-
     local UNIT_FILE=`get_unit_file $UNIT`
-    local UNIT_FULL=`echo $UNIT | sed "s/@/@$UNIT_INSTANCE/"`
-    local UNIT_WANTS=(`get_unit_wants $UNIT`)
 
     # Systemd env variables
     # https://www.freedesktop.org/software/systemd/man/systemd.service.html
-    local MAINPID=$(_get_pid)
 
     if [ -z $UNIT_FILE ] ; then
         >&2 echo "Failed to $ACTION $UNIT: Unit $UNIT not found."
         exit 1
-    else
+    else 
+        local MAINPID=$(_get_pid)
+        local UNIT_FULL=`echo $UNIT | sed "s/@/@$UNIT_INSTANCE/"`
+        local UNIT_WANTS=(`get_unit_wants $UNIT`)
         case "$ACTION" in
             status )    action_status ;;
             start )     action_start ;;
@@ -388,8 +400,8 @@ Unit File Commands:
     local ACTION="$1"
     local UNITS="${@:2}"
     local UNIT_PATHS=(
-        /etc/systemd/system/
-        /usr/lib/systemd/system/
+        ${root}etc/systemd/system/
+        ${root}usr/lib/systemd/system/
     )
 
     for UNIT in ${UNITS[@]}; do
