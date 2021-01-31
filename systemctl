@@ -6,6 +6,10 @@
 # use root= to override root of filesystem for debugging, chroot prep, etc
 [ "$root" ] || root=/
 cd "$root" && root=`pwd`/
+[ "$root" = "//" ] && root=/
+
+echo $root
+exit
 
 # use debug=verbose to print out commands as they are run
 [ "$debug" = "verbose" ] && set -x
