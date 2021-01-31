@@ -222,38 +222,49 @@ function action_restart(){
     action_start
 }
 
+function wordsplit(){
+  while read line; do
+      set -- $line
+      while [ "$#" != "0" ]; do
+          echo "$1"
+          shift
+      done
+  done
+}
+
 function action_enable(){
-    local WantedBy=$(read_option WantedBy)
-
-    if [ -z $WantedBy ] ; then
-        >&2 echo "Unit $UNIT have no WantedBy option."
-        exit 1
-    fi
+    read_multioption WantedBy | wordsplit | while read WantedBy; do
+        if [ -z $WantedBy ] ; then
+            >&2 echo "Unit $UNIT have no WantedBy option."
+            exit 1
+        fi
     
-    local WANTEDBY_DIR="${root}etc/systemd/system/$WantedBy.wants"
+        local WANTEDBY_DIR="${root}etc/systemd/system/$WantedBy.wants"
 
-    if [ ! -f "$WANTEDBY_DIR/$UNIT_FULL" ] ; then
-        mkdir -p $WANTEDBY_DIR
-        echo Created symlink from $WANTEDBY_DIR/$UNIT_FULL to $UNIT_FILE.
-        ln -s $UNIT_FILE $WANTEDBY_DIR/$UNIT_FULL
-    fi
+        if [ ! -f "$WANTEDBY_DIR/$UNIT_FULL" ] ; then
+             mkdir -p $WANTEDBY_DIR
+            echo Created symlink from $WANTEDBY_DIR/$UNIT_FULL to $UNIT_FILE.
+            ln -s $UNIT_FILE $WANTEDBY_DIR/$UNIT_FULL
+        fi
+    done
 }
     
 function action_disable(){
-    local WantedBy=$(read_option WantedBy)
+    read_multioption WantedBy | wordsplit | while read WantedBy; do
 
-    if [ -z $WantedBy ] ; then
-        >&2 echo "Unit $UNIT have no WantedBy option."
-        exit 1
-    fi
+        if [ -z $WantedBy ] ; then
+            >&2 echo "Unit $UNIT have no WantedBy option."
+            exit 1
+        fi
 
-    local WANTEDBY_DIR="${root}etc/systemd/system/$WantedBy.wants"
+        local WANTEDBY_DIR="${root}etc/systemd/system/$WantedBy.wants"
 
-    if [ -f "$WANTEDBY_DIR/$UNIT_FULL" ] ; then
-        echo Removed $WANTEDBY_DIR/$UNIT_FULL.
-        rm -f $WANTEDBY_DIR/$UNIT_FULL
-        rmdir --ignore-fail-on-non-empty $WANTEDBY_DIR
-    fi
+        if [ -f "$WANTEDBY_DIR/$UNIT_FULL" ] ; then
+            echo Removed $WANTEDBY_DIR/$UNIT_FULL.
+            rm -f $WANTEDBY_DIR/$UNIT_FULL
+            rmdir --ignore-fail-on-non-empty $WANTEDBY_DIR
+        fi
+    done
 }
 
 function action_isenabled(){
