@@ -1,15 +1,19 @@
-#!/bin/bash
+#!/bin/bash -a
 # upper vars:     like UNIT* are in exec_action context
 # lower vars:     in local function
 # camelcase vars: systemd params var
+
+cd "`dirname $0`"
+myDir="`pwd`"
 
 # use root= to override root of filesystem for debugging, chroot prep, etc
 [ "$root" ] || root=/
 cd "$root" && root=`pwd`/
 [ "$root" = "//" ] && root=/
 
-echo $root
-exit
+[ "$TMPDIR" ] || TMPDIR=/tmp
+[ "$JOURNAL_DIR" ] || JOURNAL_DIR="${TMPDIR}/.journal"
+FIFO="${JOURNAL_DIR}/fifo"
 
 # use debug=verbose to print out commands as they are run
 [ "$debug" = "verbose" ] && set -x
@@ -154,20 +158,27 @@ function action_start(){
 
         [ -f "$EnvironmentFile" ] && source "$EnvironmentFile"
 
-        cmd=("$ssd --background --start --pidfile $PIDFile $makepid")
-
-        [ -f "$WorkingDirectory" ] && cmd+=("--chdir $WorkingDirectory")
-        [ -n "$User" ] && cmd+=("--chuid $User")
-
-        cmd+=(--exec "${ExecStart[0]}" -- "${ExecStart[@]:1}")
-
         while IFS=$'\n' read -a i; do
             # ignore errors
             $(eval echo "$i") || echo
         done  <<< "${ExecStartPre[@]}"
 
-        eval "$(echo "${cmd[@]}")"
+        if [ ! -p "$FIFO" ]; then
+            # journald is not running - legacy behavioru
+            cmd=("$ssd --background --start --pidfile $PIDFile $makepid")
 
+            [ -f "$WorkingDirectory" ] && cmd+=" --chdir $WorkingDirectory"
+            [ -n "$User" ] && cmd+=" --chuid $User"
+            cmd+=" --exec \"${ExecStart[0]}\" -- \"${ExecStart[@]:1}\""
+        else
+          cmd=("daemon -N -F $PIDFile -i -l $FIFO")
+          [ -n "$User" ] && cmd+=" -u $User"
+          [ -d "$WorkingDirectory" ] && cmd+=" -D $WorkingDirectory"
+          cmd+=" \"${ExecStart[0]}\" \"${ExecStart[@]:1}\""
+        fi
+        
+        eval "$(echo "${cmd[@]}")"
+        
         while IFS=$'\n' read -a i; do
             # ignore errors
             $(eval echo "$i") || echo
@@ -200,7 +211,7 @@ function action_stop(){
     # Stop service 
     if [ -z "$ExecStop" ] ; then
         cmd="$ssd --stop --pidfile $PIDFile"
-        [ -n "$User" ] && cmd+=("--chuid $User")
+        [ -n "$User" ] && cmd+=" --chuid $User"
     else
         cmd="$ExecStop"
         [ -n "$User" ] && cmd="runuser -m -u $User -- $cmd"
