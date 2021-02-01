@@ -13,7 +13,6 @@ cd "$root" && root=`pwd`/
 
 [ "$TMPDIR" ] || TMPDIR=/tmp
 [ "$JOURNAL_DIR" ] || JOURNAL_DIR="${TMPDIR}/.journal"
-FIFO="${JOURNAL_DIR}/fifo"
 
 # use debug=verbose to print out commands as they are run
 [ "$debug" = "verbose" ] && set -x
@@ -163,20 +162,21 @@ function action_start(){
             $(eval echo "$i") || echo
         done  <<< "${ExecStartPre[@]}"
 
-        if [ ! -p "$FIFO" ]; then
-            # journald is not running - legacy behavioru
+        if [ ! "${SYSTEMCTL_LOG_DIR}" ]; then
+            # legacy behaviour
             cmd=("$ssd --background --start --pidfile $PIDFile $makepid")
 
             [ -f "$WorkingDirectory" ] && cmd+=" --chdir $WorkingDirectory"
             [ -n "$User" ] && cmd+=" --chuid $User"
             cmd+=" --exec \"${ExecStart[0]}\" -- \"${ExecStart[@]:1}\""
         else
-          cmd=("daemon -N -F $PIDFile -i -l $FIFO")
+          LOG="${SYSTEMCTL_LOG_DIR}/${UNIT_NAME}"
+          cmd=("daemon -N -F $PIDFile -i -O $LOG -E $LOG")
           [ -n "$User" ] && cmd+=" -u $User"
           [ -d "$WorkingDirectory" ] && cmd+=" -D $WorkingDirectory"
           cmd+=" \"${ExecStart[0]}\" \"${ExecStart[@]:1}\""
         fi
-        
+
         eval "$(echo "${cmd[@]}")"
         
         while IFS=$'\n' read -a i; do
