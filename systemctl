@@ -1,4 +1,12 @@
 #!/bin/bash -a
+#
+# @file systemctl
+#       Fork of fake-systemd which is used to start/stop services in the DCP CI,
+#       where the real systemctl is not available to the Docker configuration.
+# @author  Andrei Kvapil, kvapss@gmail.com
+#          Wes Garland, wes@kingsds.network
+# @date Jul 2016, Jan 2021
+#
 # upper vars:     like UNIT* are in exec_action context
 # lower vars:     in local function
 # camelcase vars: systemd params var
@@ -11,19 +19,23 @@ myDir="`pwd`"
 cd "$root" && root=`pwd`/
 [ "$root" = "//" ] && root=/
 
-[ "$TMPDIR" ] || TMPDIR=/tmp
+[ "$TMPDIR" ] || TMPDIR=${root}tmp
 [ "$JOURNAL_DIR" ] || JOURNAL_DIR="${TMPDIR}/.journal"
+mkdir -p ${TMPDIR} ${root}run/systemctl/
+chmod 1777 ${root}run/systemctl/
 
 # use debug=verbose to print out commands as they are run
 [ "$debug" = "verbose" ] && set -x
 
-# Search for start-stop-daemon - varies based on distro
-ssd=/usr/bin/start-stop-daemon
-[ -x "$ssd" ] || ssd=/bin/start-stop-daemon
-[ -x "$ssd" ] || ssd=${root}usr/bin/start-stop-daemon
-[ -x "$ssd" ] || ssd=${root}bin/start-stop-daemon
-[ -x "$ssd" ] || ssd=`which start-stop-daemon`
-[ ! -x "$ssd" ] && echo "Could not locate start-stop-daemon" 2>&1 && exit 1
+# verify existence of oddball dependencies
+if ! daemon -h >/dev/null; then
+    echo "Could not locate daemon (http://libslack.org/daemon/)" >&2
+    exit 1
+fi
+if ! start-stop-daemon --help >/dev/null; then
+    echo "Could not locate start-stop-daemon (http://libslack.org/daemon/)" >&2
+    exit 1
+fi
 
 function get_unit_file(){
     for dir in ${UNIT_PATHS[@]} ; do
@@ -116,6 +128,12 @@ function action_start(){
         eval $(echo "export $envvar")
     done
 
+    if [ "$User" ]; then
+        HOME=~"$User"
+        USER="$User"
+        export HOME USER
+    fi
+    
     # From doc: oneshot are the only service units that may have more than one
     # ExecStart= specified. They will be executed in order until either they
     # are all successful or one of them fails.
@@ -147,7 +165,7 @@ function action_start(){
 
         makepid=""
         if [ -z "$PIDFile" ]; then
-            PIDdir="${root}run/${UNIT_NAME}"
+            PIDdir="${root}run/systemctl/${UNIT_NAME}"
 
             mkdir -p $PIDdir
             [ -n "$User" ] && chown $User $PIDdir
@@ -164,7 +182,7 @@ function action_start(){
 
         if [ ! "${SYSTEMCTL_LOG_DIR}" ]; then
             # legacy behaviour
-            cmd=("$ssd --background --start --pidfile $PIDFile $makepid")
+            cmd=("start-stop-daemon --background --start --pidfile $PIDFile $makepid")
 
             [ -f "$WorkingDirectory" ] && cmd+=" --chdir $WorkingDirectory"
             [ -n "$User" ] && cmd+=" --chuid $User"
@@ -199,7 +217,7 @@ function action_stop(){
     local ExecStopPost=$(read_multioption ExecStopPost)
     local Environment=$(read_multioption Environment)
 
-    [ -z "$PIDFile" ] && PIDFile="${root}run/${UNIT_NAME}/${UNIT_NAME}.pid"
+    [ -z "$PIDFile" ] && PIDFile="${root}run/systemctl/${UNIT_NAME}/${UNIT_NAME}.pid"
     [ -f "$EnvironmentFile" ] && source "$EnvironmentFile"
 
     # export Environnement
@@ -210,7 +228,7 @@ function action_stop(){
 
     # Stop service 
     if [ -z "$ExecStop" ] ; then
-        cmd="$ssd --stop --pidfile $PIDFile"
+        cmd="start-stop-daemon --stop --pidfile $PIDFile"
         [ -n "$User" ] && cmd+=" --chuid $User"
     else
         cmd="$ExecStop"
@@ -320,7 +338,7 @@ function _get_pid(){
     local PIDFile=$(read_option PIDFile)
 
     # set default pifile
-    [ -z "$PIDFile" ] && PIDFile="${root}run/${UNIT_NAME}/${UNIT_NAME}.pid"
+    [ -z "$PIDFile" ] && PIDFile="${root}run/systemctl/${UNIT_NAME}/${UNIT_NAME}.pid"
 
     # now check if the pidfile exists
     if [ ! -f "$PIDFile" ]; then
