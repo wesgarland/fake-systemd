@@ -21,8 +21,7 @@ cd "$root" && root=`pwd`/
 
 [ "$TMPDIR" ] || TMPDIR=${root}tmp
 [ "$JOURNAL_DIR" ] || JOURNAL_DIR="${TMPDIR}/.journal"
-mkdir -p ${TMPDIR} ${root}run/systemctl/
-chmod 1777 ${root}run/systemctl/
+mkdir -m 1777 -p ${TMPDIR} ${root}run/systemctl/
 
 # use debug=verbose to print out commands as they are run
 [ "$debug" = "verbose" ] && set -x
